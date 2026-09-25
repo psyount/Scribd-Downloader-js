@@ -356,10 +356,10 @@ javascript:(async function(){
             } else {
                 pdfPages.set(pageNum, bytes);
             }
-            return true;
+            return null;
         } catch(e) {
             console.error(`Page ${pageNum} failed:`, e);
-            return false;
+            return (e && e.message) || String(e); // e.g. "Load failed" = blocked by CORS
         }
     }
 
@@ -412,6 +412,7 @@ javascript:(async function(){
         const concurrency = Math.max(1, Math.min(12, parseInt(parallelInput.value) || config.concurrency));
         const inflight = new Set();
         const failed = [];
+        let firstError = '';
         let stoppedEarly = false;
         const myRun = ++runId;
 
@@ -431,11 +432,16 @@ javascript:(async function(){
             if (!url) {
                 log(`Skipping Page ${pageNum} (No Image)`, "#e67e22");
                 failed.push(pageNum);
+                firstError = firstError || 'image not found on page';
                 doneCount++;
             } else {
                 while (inflight.size >= concurrency) await Promise.race(inflight);
-                const task = processPage(pageNum, url).then(ok => {
-                    if (!ok) failed.push(pageNum);
+                const task = processPage(pageNum, url).then(err => {
+                    if (err) {
+                        failed.push(pageNum);
+                        firstError = firstError || err;
+                        log(`Page ${pageNum} failed: ${err}`, "#e74c3c");
+                    }
                     doneCount++;
                     updateProgress();
                 }).finally(() => inflight.delete(task));
@@ -462,7 +468,8 @@ javascript:(async function(){
         }
 
         failed.sort((a, b) => a - b);
-        const summary = failed.length ? `\nFailed pages: ${failed.join(', ')}` : '';
+        const summary = failed.length ? `\nFailed pages: ${failed.join(', ')}\nReason: ${firstError}` : '';
+        log(failed.length ? `Done, ${failed.length} failed` : "Done!", failed.length ? "#e67e22" : "#27ae60");
         alert((stoppedEarly ? "Stopped early." : "Download Complete!") + summary);
         goBtn.innerText = "COMPLETED";
         goBtn.style.background = "#27ae60";
@@ -478,6 +485,12 @@ javascript:(async function(){
             isRunning = false;
             goBtn.innerText = "RESUME";
             goBtn.style.background = "#1abc9c";
+            return;
+        }
+
+        // Page images are only reachable in the embed viewer
+        if (!isContentMode()) {
+            if (confirm("Downloading only works in CONTENT MODE.\nSwitch to content mode now?")) goToContentMode();
             return;
         }
 
